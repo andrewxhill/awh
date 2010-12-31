@@ -37,19 +37,24 @@ class Cell(Document):
     level1 = ListField(IntegerField())
     
 
-def ErrorXRegion(sn):
-    latArray = {}
-    cuimArray = {}
-    cellsArray = {}
-    recsArray = {}
-    regionStats = {}
+def ErrorXLat(sn):
+    latitudes = {}
     couch = couchdb.Server()
     db = couch[sn]
     for key in db.view('_all_docs'):
         row = Cell.load(db, key.id)
         #row = Cell.load(db, uuid)
         cell = int(row.cellid)  
-        rw = 18-int(math.floor(cell/3600))
+        rw = 180-int(math.floor(cell/360))
+        try:
+            assert latitudes[rw]
+        except:
+            latitudes[rw] = []
+        for rec in row.records:
+            try:
+                if rec.cuim > 0.0:
+                    latidues[rw].append(rec.cuim)
+        
         for reg in row.level1:
             
             if int(reg) > -1:

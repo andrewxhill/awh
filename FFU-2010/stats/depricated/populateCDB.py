@@ -2,14 +2,16 @@
 from __future__ import division
 from pylab import *
 from pg import DB
-import math
+import math, time, random
 import numpy as np
+from ruffus import *
 import couchdb
 from couchdb.client import Server
 from couchdb.schema import Schema, Document, TextField, IntegerField, DateTimeField, ListField, FloatField, DictField
 
-CELL_IDS = range(64801) #64800
-pconn = DB('gbif_eorm','evo.colorado.edu',5432,user='postgres',passwd='tful282')
+JOB_CELL_IDS = range(4000) #64800
+SETNAME = "gbif_aves"
+DELETE = False
 
 def IsUnique(sn, id, taxa):
     q = "SELECT count(*) FROM %s WHERE cell_id != %s AND geospatial_issue='0' AND binomial != '%s' and latitude != 0 and longitude != 0 and latitude is not null and basis_of_record != 'fossil'" % (sn,id,taxa)
@@ -23,7 +25,15 @@ def IsUnique(sn, id, taxa):
     else:
         return False
 
-def Main(sn, DELETE = False):
+params = [
+            [SETNAME,JOB_CELL_IDS[0: int(math.floor(len(JOB_CELL_IDS)/3))]],
+            [SETNAME,JOB_CELL_IDS[int(math.floor(len(JOB_CELL_IDS)/3)): len(JOB_CELL_IDS)-int(math.floor(len(JOB_CELL_IDS)/3))]],
+            [SETNAME,JOB_CELL_IDS[len(JOB_CELL_IDS)-int(math.floor(len(JOB_CELL_IDS)/3)):]]
+         ]
+@parallel(params)
+def Main(sn, CELL_IDS):
+    pconn = DB('gbif_eorm','evo.colorado.edu',5432,user=UNAME,passwd=PASS)
+    
     couch = couchdb.Server()
     if DELETE:
         try:
@@ -57,7 +67,9 @@ def Main(sn, DELETE = False):
         taxaunique = ListField(TextField())
         cuimmean = FloatField()
         cuimstd = FloatField()
-        
+        level1 = ListField(IntegerField())
+       
+    time.sleep(int(math.floor(CELL_IDS[0]/10)))
     #select all from sn by cellid
     for i in CELL_IDS:
         row = Cell(cellid=i)
@@ -70,6 +82,14 @@ def Main(sn, DELETE = False):
         uniques = []
         cuims = []
         last = ""
+        regions = []
+        
+        q = "SELECT level1_id FROM cell_level1_map WHERE cell_id = %s" % (i)
+        cur = pconn.query(q)
+        res = cur.getresult()
+        for r in res:
+            regions.append(int(r[0]))
+            
         print "Running select on %s" % i
         q = "SELECT occurrence_id,binomial, latitude, longitude, coordinate_precision, geospatial_issue, date_part('year',date_collected) FROM %s WHERE cell_id = %s AND binomial != '' and binomial is not null and latitude != 0 and longitude != 0 and latitude is not null and basis_of_record != 'fossil' ORDER BY binomial" % (sn,i)
         cur = pconn.query(q)
@@ -92,7 +112,7 @@ def Main(sn, DELETE = False):
                      'lat': float(r[2]),
                      'lon': float(r[3]),
                      'cuim': cuim,
-                     'year': int(r[6])
+                     'year': int(r[6]) if r[6] is not None else None
                     })
             else:
                 issues.append(
@@ -100,7 +120,7 @@ def Main(sn, DELETE = False):
                      'binomial': r[1],
                      'type': int(r[5]),
                      'cuim': cuim,
-                     'year': int(r[6])
+                     'year': int(r[6]) if r[6] is not None else None
                     })
                     
         if cuimct != 0:
@@ -121,8 +141,9 @@ def Main(sn, DELETE = False):
         row.cuimmean=cuimmean
         row.cuimstd=cuimstd
         row.cuimct=cuimct
+        row.level1 = regions
         row.store(db)
-        
+    """
     # read the data from the database
     print 'reading all rows from database'
     print len(db), 'rows retrieved from database'
@@ -140,11 +161,10 @@ def Main(sn, DELETE = False):
     print 'cellid', 'unique', 'cuimed'
     for res in results:
        print res
-       
+    """
 
 
 
 
 if __name__ == "__main__":  
-    setname = "gbif_amphibia"
-    Main(setname, DELETE=True)
+    pipeline_run([Main], multiprocess = 3)
